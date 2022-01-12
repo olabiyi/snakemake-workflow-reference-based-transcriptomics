@@ -43,9 +43,12 @@ Install Snakemake using [conda](https://conda.io/projects/conda/en/latest/user-g
 For installation details, see the [instructions in the Snakemake documentation](https://snakemake.readthedocs.io/en/stable/getting_started/installation.html).
 
 ### Step 4: Install non_model_RNA_Seq environment (Optional)
-If you would like to use the same enviroment the pipeine was tested in
+
+If you would like to use the same enviroment the pipeine was tested in:
+
 	conda env create -f envs/non_model_RNA_Seq.yaml  
 
 ### Step 4: Execute workflow
-conda activate snakemake
-snakemake -pr --keep-going --rerun-incomplete --restart-times 3 --cores 14
+
+	conda activate snakemake
+	snakemake -pr --keep-going --rerun-incomplete --restart-times 3 --cores 14

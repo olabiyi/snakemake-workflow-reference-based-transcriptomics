@@ -39,11 +39,11 @@ RULES = ["Download_reference","Rename_files", "Create_gene2name_file", "QC_pre_t
 
 rule all:
     input:
-        #expand("01.raw_data/{sample}/{sample}.fastq.gz", sample=config['SAMPLES']),
+        expand("01.raw_data/{sample}/{sample}.fastq.gz", sample=config['SAMPLES']),
         "01.Download_reference/reference.fa.gz",
-        #"02.Create_gene2name_file/gene2name.tsv",
-        #"04.QC/pre_trim/multiqc_report.html",
-        #"04.QC/post_trim/multiqc_report.html",
+        "02.Create_gene2name_file/gene2name.tsv",
+        "04.QC/pre_trim/multiqc_report.html",
+        "04.QC/post_trim/multiqc_report.html",
         #"08.Summarize_mapping_statistics/multiqc_report.html",
         expand("09.Plot_lengths/{sample}/{sample}_diagnostic.pdf", sample=config['SAMPLES']),
         "10.Generate_count_matrix/gene_counts_matrix.tsv"
