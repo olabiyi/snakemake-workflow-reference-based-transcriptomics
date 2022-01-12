@@ -1,0 +1,38 @@
+ORGANISM: "Human"
+FASTA: "https://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/latest_assembly_versions/GCF_000001405.39_GRCh38.p13/GCF_000001405.39_GRCh38.p13_genomic.fna.gz" # "http://ftp.ensembl.org/pub/release-103/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.toplevel.fa.gz" #"http://ftp.ensembl.org/pub/release-103/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna_rm.primary_assembly.fa.gz" 
+GTF: "https://ftp.ncbi.nlm.nih.gov/genomes/refseq/vertebrate_mammalian/Homo_sapiens/latest_assembly_versions/GCF_000001405.39_GRCh38.p13/GCF_000001405.39_GRCh38.p13_genomic.gtf.gz"  #"http://ftp.ensembl.org/pub/release-103/gtf/homo_sapiens/Homo_sapiens.GRCh38.103.chr.gtf.gz" #"http://ftp.ensembl.org/pub/release-103/gtf/homo_sapiens/Homo_sapiens.GRCh38.103.gtf.gz"
+SAMPLE_FILE: "config/sample.tsv"
+SAMPLES: ["0A", "0B", "0C", "0D", "25A", "25B", "25C", "25D" ]
+ALIGNER: "bowtie2" # "bowtie", "bowtie2", "star"
+
+
+PROJECT_DIR: "/mnt/e/biyi"
+
+# Full paths the specified programs
+programs_path:
+    multiqc: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/multiqc"
+    trimmomatic: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/trimmomatic"
+    bowtie:
+        bowtie: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/bowtie2"
+        build: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/bowtie2-build"
+    samtools: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/samtools"
+    fastqc: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/fastqc"
+    rsem:
+        prepare_reference: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/rsem-prepare-reference"
+        calculate_expression: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/rsem-calculate-expression" 
+        plot_model: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/rsem-plot-model"
+        generate_matrix: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/bin/rsem-generate-data-matrix"
+        
+
+parameters:
+    trimmomatic: 
+        adaptors: "/home/obayomi/miniconda3/envs/non_model_RNA_Seq/share/trimmomatic-0.39-2/adapters/TruSeq2-SE.fa"
+        min_len: 30
+
+
+# Full paths to your conda environments and their respective PERL5LIB directories
+conda:
+    non_model_RNA_Seq:
+        env: "source activate /home/obayomi/miniconda3/envs/non_model_RNA_Seq"
+        perl5lib: "export PERL5LIB=/home/obayomi/miniconda3/envs/non_model_RNA_Seq/lib/5.26.2"
+

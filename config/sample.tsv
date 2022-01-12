@@ -1,0 +1,9 @@
+SampleID	Type	Prefix	Direction	Old_name	New_name
+0A	Forward	0A_S1_L005_R1_001	_1	01.raw_data/0A/0A_S1_L005_R1_001.fastq.gz	01.raw_data/0A/0A.fastq.gz
+0B	Forward	0B_S2_L005_R1_001	_1	01.raw_data/0B/0B_S2_L005_R1_001.fastq.gz	01.raw_data/0B/0B.fastq.gz
+0C	Forward	0C_S3_L005_R1_001	_1	01.raw_data/0C/0C_S3_L005_R1_001.fastq.gz	01.raw_data/0C/0C.fastq.gz
+0D	Forward	0D_S4_L005_R1_001	_1	01.raw_data/0D/0D_S4_L005_R1_001.fastq.gz	01.raw_data/0D/0D.fastq.gz
+25A	Forward	25A_S5_L005_R1_001	_1	01.raw_data/25A/25A_S5_L005_R1_001.fastq.gz	01.raw_data/25A/25A.fastq.gz
+25B	Forward	24B_S6_L005_R1_001	_1	01.raw_data/25B/25B_S6_L005_R1_001.fastq.gz	01.raw_data/25B/25B.fastq.gz
+25C	Forward	25C_S7_L005_R1_001	_1	01.raw_data/25C/25C_S7_L005_R1_001.fastq.gz	01.raw_data/25C/25C.fastq.gz
+25D	Forward	25D_S8_L005_R1_001	_1	01.raw_data/25D/25D_S8_L005_R1_001.fastq.gz	01.raw_data/25D/25D.fastq.gz
