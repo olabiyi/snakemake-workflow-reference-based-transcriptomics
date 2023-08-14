@@ -15,7 +15,12 @@ min_length=config['parameters']['trimmomatic']['min_len']
 
 sample_file = config["SAMPLE_FILE"]
 
-metadata = pd.read_table(sample_file)
+CONDA_ACTIVATE = config['conda']['non_model_RNA_Seq']['env']
+
+INDEX="02.Build_rRNA_index/{DB}.done".format(DB=config["DATABASE_NAME"])
+
+#metadata = pd.read_table(sample_file)
+
 
 # Generate the rule graph on the commadline
 # Rule graph
@@ -30,66 +35,34 @@ metadata = pd.read_table(sample_file)
 onsuccess:
     print("Workflow completed without any error")
 
-
-RULES = ["Download_reference","Rename_files", "Create_gene2name_file", "QC_pre_trim",
-         "SummarizeQC_pre_trim", "Prepare_reference", "Trim_reads", "QC_post_trim",
-         "SummarizeQC_post_trim", "Estimate_abundance", "Get_mapping_statistics",
-         "Summarize_mapping_statistics", "Plot_lengths", "Generate_count_matrix"]
-
-
 rule all:
     input:
-        expand("01.raw_data/{sample}/{sample}.fastq.gz", sample=config['SAMPLES']),
         "01.Download_reference/reference.fa.gz",
         "02.Create_gene2name_file/gene2name.tsv",
         "04.QC/pre_trim/multiqc_report.html",
         "04.QC/post_trim/multiqc_report.html",
-        #"08.Summarize_mapping_statistics/multiqc_report.html",
+        INDEX,
+        expand("05.SortSam/{sample}/{sample}.sorted.bam.bai", sample=config["SAMPLES"]),
+        expand(["06.remove_rRNA/{sample}/{sample}_R1.fastq.gz", "06.remove_rRNA/{sample}/{sample}_R2.fastq.gz"],
+                sample=config['SAMPLES']),
+        "07.QC/unmapped_reads/multiqc_report.html",
         expand("09.Plot_lengths/{sample}/{sample}_diagnostic.pdf", sample=config['SAMPLES']),
         "10.Generate_count_matrix/gene_counts_matrix.tsv"
 
-
-
-
-# This rule will Make rule specific log directories
-# # in order to easily store the standard input and standard error
-# # generated when submiting jobs to the cluster
-rule Make_logs_directories:
-    output:
-        directory("logs/Download_reference/"),
-        directory("logs/Rename_files/"),
-        directory("logs/Create_gene2name_file/"),
-        directory("logs/QC_pre_trim/"),
-        directory("logs/SummarizeQC_pre_trim/"),
-        directory("logs/Prepare_reference/"),
-        directory("logs/Estimate_abundance/"),
-        directory("logs/Plot_lengths/"),
-        directory("logs/Generate_count_matrix/")
-    threads: 1
-    log: "logs/Make_logs_directories/Make_logs_directories.log"
-    shell:
-        """
-         [ -d logs/ ] || mkdir -p logs/
-         cd logs/
-         for RULE in {RULES}; do
-          [ -d ${{RULE}}/ ] || mkdir -p ${{RULE}}/
-         done
-        """
-
-
 rule Download_reference:
-    input:
-        log_dirs = rules.Make_logs_directories.output
     output:
         fasta = "01.Download_reference/reference.fa.gz",
-        gtf =   "01.Download_reference/reference.gtf"
+        gtf =   "01.Download_reference/reference.gtf.gz"
     log: "logs/Download_reference/Download_reference.log"
     params: 
         fasta = config['FASTA'],
-        gtf = config['GTF']
-    threads: 5
+        gtf = config['GTF'],
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 10
+#    conda: config['CONDA']
     shell:
         """
+         {params.CONDA_ACTIVATE}
          # Download the reference gene fasta sequences and GTF abnnotation
          wget -O {output.fasta} {params.fasta}
          wget -O {output.gtf} {params.gtf}
@@ -102,24 +75,16 @@ rule Create_gene2name_file:
     input: rules.Download_reference.output.gtf
     output: "02.Create_gene2name_file/gene2name.tsv"
     log: "logs/Create_gene2name_file/Create_gene2name_file.log"
-    threads: 1
+    threads: 10
+#    conda: config['CONDA']
+    params:
+        CONDA_ACTIVATE=CONDA_ACTIVATE
     shell:
         """
-        function geneid2name(){{
-
-	     # A function to generate a table of geneid to name from a GTF file
-	     # USAGE: geneid2name <path_to_gtf_file>
-	     local GTF=$1
-
-         grep -v "#" ${{GTF}} | \
-	     awk -F'\t' '{{print $9}}' | \
-	     awk -F';' 'BEGIN{{OFS="\t"}} {{print $1,$3}}' | \
-	     grep "gene_name" | \
-	     sed -E 's/gene_id \"(.+?)\" gene_name \"(.+?)\"/\1\t\2/g'
-
-        }}
-
-         geneid2name {input} > {output}
+        {params.CONDA_ACTIVATE}
+        bioawk -c gff  \
+           '$feature=="gene"{{printf "%s\\t%s\\n", $seqname, $group}}' \
+            {input} > {output}
         """
 
 REF="03.Prepare_reference/ref/{organism}_ref".format(organism=config['ORGANISM'])
@@ -132,39 +97,34 @@ rule Prepare_reference:
                  ".chrlist", ".idx.fa", ".n2g.idx.fa")
     log: "logs/Prepare_reference/Prepare_reference.log"
     params:
-        program=config['programs_path']['rsem']['prepare_reference'],
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib'],
-        aligner=config['ALIGNER'] # "bowtie", "bowtie2", "star"
-    threads: 12
+        aligner=config['ALIGNER'], # "bowtie", "bowtie2", "star",
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
+        {params.CONDA_ACTIVATE}
         ALIGNER={params.aligner}
 
         [ -e GENOME.fasta ] || zcat {input.fasta} > GENOME.fasta
         [ -e GENOME.GTF ] || zcat {input.gtf} > GENOME.GTF
 
         if [ ${{ALIGNER}} == "bowtie" ]; then
-          {params.program} \
+          rsem-prepare-reference \
               --gtf GENOME.GTF \
               --bowtie \
               GENOME.fasta  {REF}
 
         elif [ ${{ALIGNER}} == "star" ]; then
 
-          {params.program} \
+          rsem-prepare-reference \
               --gtf GENOME.GTF \
               --star \
               GENOME.fasta {REF}
 
         else
 
-          {params.program} \
+          rsem-prepare-reference \
               --gtf GENOME.GTF \
               --bowtie2 \
               GENOME.fasta {REF}
@@ -175,302 +135,431 @@ rule Prepare_reference:
         rm -rf GENOME.fasta
         """
 
-rule Rename_files:
-#    input: 
-#        log_dirs=rules.Make_logs_directories.output
-    output:
-        expand("01.raw_data/{sample}/{sample}.fastq.gz", sample=config['SAMPLES'])
-    log: "logs/Rename_files/Rename_files.log"
-    threads: 5
-    run:
-        for old,new in zip(metadata.Old_name,metadata.New_name):
-            shell("[ -f {new} ] || mv {old} {new}".format(old=old, new=new))
-
-
-
 rule QC_pre_trim:
     input:
-        read="01.raw_data/{sample}/{sample}.fastq.gz",
-#        log_dirs=rules.Make_logs_directories.output
+        forward="01.raw_data/{sample}/{sample}_R1.fastq.gz",
+        rev="01.raw_data/{sample}/{sample}_R2.fastq.gz"
     output:
-        "04.QC/pre_trim/{sample}/{sample}_fastqc.html"
+        forward_html="04.QC/pre_trim/{sample}/{sample}_R1_fastqc.html",
+        rev_html="04.QC/pre_trim/{sample}/{sample}_R2_fastqc.html"
     params:
-        program=config['programs_path']['fastqc'],
         out_dir=lambda w, output: path.dirname(output[0]),
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib'],
-        threads=5
+        threads=10,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
     log: "logs/QC_pre_trim/{sample}/{sample}.log"
-    threads: 5
+    threads: 10
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-          {params.program} --outdir {params.out_dir}/ \
-             --threads {params.threads} {input.read}
-
+        {params.CONDA_ACTIVATE}
+          fastqc --outdir {params.out_dir}/ \
+             --threads {params.threads} \
+             {input.forward} {input.rev} > {log} 2>&1
         """
 
 
 rule SummarizeQC_pre_trim:
     input:
-        expand("04.QC/pre_trim/{sample}/{sample}_fastqc.html", sample=config['SAMPLES'])
+        forward_html=expand("04.QC/pre_trim/{sample}/{sample}_R1_fastqc.html", sample=config['SAMPLES']),
+        rev_html=expand("04.QC/pre_trim/{sample}/{sample}_R2_fastqc.html", sample=config['SAMPLES'])
     output:
         "04.QC/pre_trim/multiqc_report.html"
     log: "logs/SummarizeQC_pre_trim/multiqc.log"
     params:
-        program=config['programs_path']['multiqc'],
         out_dir=lambda w, output: path.dirname(output[0]),
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
-    threads: 1
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 10
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-          {params.program} \
+         {params.CONDA_ACTIVATE}
+          multiqc \
               --interactive \
               -f {params.out_dir} \
-              -o {params.out_dir}
+              -o {params.out_dir} > {log} 2>&1
         """
-
 
 rule Trim_reads:
     input:
-        read="01.raw_data/{sample}/{sample}.fastq.gz",
-#        log_dirs=rules.Make_logs_directories.output
+        forward="01.raw_data/{sample}/{sample}_R1.fastq.gz",
+        rev="01.raw_data/{sample}/{sample}_R2.fastq.gz"
     output:
-        "05.Trim_reads/{sample}/{sample}.fastq.gz"
-    log:
-        "logs/Trim_reads/{sample}/{sample}.log"
+        r1="05.Trim_reads/{sample}/{sample}_R1.fastq.gz",
+        r2="05.Trim_reads/{sample}/{sample}_R2.fastq.gz",
+        # reads where trimming entirely removed the mate
+        r1_unpaired="05.Trim_reads/{sample}/{sample}_R1.unpaired.fastq.gz",
+        r2_unpaired="05.Trim_reads/{sample}/{sample}_R2.unpaired.fastq.gz"
+    log: "logs/Trim_reads/{sample}/{sample}.log"
     params:
-        program=config['programs_path']['trimmomatic'],
         trimmer="ILLUMINACLIP:{adaptors}:2:30:10"
                 " LEADING:3 TRAILING:3 SLIDINGWINDOW:4:20"
                 " MINLEN:{min_length}".format(adaptors=adaptors,
                                           min_length=min_length),
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
-    threads: 5
-    resources:
-        mem_mb=1024
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
+        {params.CONDA_ACTIVATE}
+        trimmomatic PE \
+        -threads {params.threads} \
+        {input.forward} {input.rev} \
+        {output.r1} {output.r1_unpaired} \
+        {output.r2} {output.r2_unpaired} \
+        {params.trimmer} > {log} 2>&1
+        """
 
-        {params.program} SE -threads {threads} {input.read} {output} {params.trimmer} >  {log} 2>&1
+# Automatically gues and trime adapters using trim galore
+rule Trim_galore_trim_adaptors:
+    input: 
+        forward=rules.Trim_reads.output.r1,
+        rev=rules.Trim_reads.output.r2
+    output:
+        forward_reads="05.Trim_galore_trim_adaptors/{sample}/{sample}_R1.fastq.gz",
+        rev_reads="05.Trim_galore_trim_adaptors/{sample}/{sample}_R2.fastq.gz",
+    log: "logs/Trim_galore_trim_adaptors/{sample}/{sample}.log"
+    threads: 1
+#    conda: config['CONDA']
+    params:
+        out_dir=lambda w, output: path.dirname(output[0]),
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    shell:
+        """ 
+        {params.CONDA_ACTIVATE}
+        trim_galore \
+           -o {params.out_dir} \
+           --paired {input.forward} {input.rev} > {log} 2>&1
 
+        #Rename the files
+        #Fastq files
+        mv {params.out_dir}/{wildcards.sample}_R1_val_1.fq.gz {params.out_dir}/{wildcards.sample}_R1.fastq.gz
+        mv {params.out_dir}/{wildcards.sample}_R2_val_2.fq.gz {params.out_dir}/{wildcards.sample}_R2.fastq.gz
         """
 
 rule QC_post_trim:
     input:
-        "05.Trim_reads/{sample}/{sample}.fastq.gz"
+        forward=rules.Trim_galore_trim_adaptors.output.forward_reads,
+        rev=rules.Trim_galore_trim_adaptors.output.rev_reads  
     output:
-        "04.QC/post_trim/{sample}/{sample}_fastqc.html"
-    threads: 1
+        forward_html="04.QC/post_trim/{sample}/{sample}_R1_fastqc.html",
+        rev_html="04.QC/post_trim/{sample}/{sample}_R2_fastqc.html"
+    log: "logs/QC_post_trim/{sample}/{sample.log}"
+    threads: 10
+#    conda: config['CONDA']
     params:
-        program=config['programs_path']['fastqc'],
+        threads=10,
         out_dir=lambda w, output: path.dirname(output[0]),
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
+        CONDA_ACTIVATE=CONDA_ACTIVATE
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-        {params.program} --outdir {params.out_dir} \
-        --threads {threads} {input} 
+        {params.CONDA_ACTIVATE}
+        fastqc --outdir {params.out_dir} \
+            --threads {params.threads} \
+            {input.forward} {input.rev} > {log}  2>&1
         """
 
 rule SummarizeQC_post_trim:
     input:
-        expand("04.QC/post_trim/{sample}/{sample}_fastqc.html",
+        forward_html=expand("04.QC/post_trim/{sample}/{sample}_R1_fastqc.html",
+                 sample=config['SAMPLES']),
+        rev_html=expand("04.QC/post_trim/{sample}/{sample}_R2_fastqc.html",
                  sample=config['SAMPLES'])
     output:
         "04.QC/post_trim/multiqc_report.html"
+    log: "logs/SummarizeQC_post_trim/multiqc.log" 
     params:
-        program=config['programs_path']['multiqc'],
         out_dir=lambda w, output: path.dirname(output[0]),
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
-    threads: 1
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 10
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-        {params.program} --interactive -f {params.out_dir} -o {params.out_dir}
+        {params.CONDA_ACTIVATE}
+        multiqc --interactive -f {params.out_dir} \
+            -o {params.out_dir} > {log} 2>&1
         """
 
+rule Download_rRNA:
+    output:  "01.Download_rRNA/silva.fasta"
+    threads: 10
+    params:
+        LSU=config["LSU_URL"],
+        SSU=config["SSU_URL"],
+        out_dir=lambda wildcards, output: path.dirname(output[0]),
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    log: "logs/Download_rRNA/Download_rRNA.log"
+#    conda: config['CONDA']
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        wget -O {params.out_dir}/LSU.fasta.gz {params.LSU} > {log} 2>&1
+        wget -O {params.out_dir}/SSU.fasta.gz {params.SSU} >> {log} 2>&1
+
+        zcat {params.out_dir}/LSU.fasta.gz \
+                {params.out_dir}/SSU.fasta.gz > {params.out_dir}/temp.rna.fasta
+        bioawk -c fastx '{{print ">"$name" "$comment; gsub(/U/,"T",$seq); print $seq}}' \
+            {params.out_dir}/temp.rna.fasta  >  {output}
+        """
+
+rule Build_rRNA_index:
+    input: rules.Download_rRNA.output
+    output:
+        index="02.Build_rRNA_index/{DB}.1.bt2".format(DB=config["DATABASE_NAME"]),
+        done="02.Build_rRNA_index/{DB}.done".format(DB=config["DATABASE_NAME"])
+    log: "logs/Build_rRNA_index/Build_rRNA_index.log"
+    threads: 20
+#    conda: config['CONDA']
+    params:
+        index="02.Build_rRNA_index/{DB}".format(DB=config["DATABASE_NAME"]),
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        bowtie2-build \
+            --threads {params.threads} \
+                {input} {params.index} > {log} 2>&1 && \
+        touch {output.done}
+        """
+
+rule Map_reads2rRNA:
+    input:
+        index_done=rules.Build_rRNA_index.output.done,
+        forward=rules.Trim_galore_trim_adaptors.output.forward_reads,
+        rev=rules.Trim_galore_trim_adaptors.output.rev_reads
+    output:
+        stats="04.Map_reads2rRNA/{sample}/{sample}.stats",
+        sam="04.Map_reads2rRNA/{sample}/{sample}.sam"
+    log: "logs/Map_reads2rRNA/{sample}/{sample}.log"
+#    conda: config['CONDA']
+    params:
+        index="02.Build_rRNA_index/{DB}".format(DB=config["DATABASE_NAME"]),
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        bowtie2 \
+            -p {params.threads} \
+            --rg-id {wildcards.sample} \
+            --rg SM:{wildcards.sample} \
+            -x {params.index} \
+            -1 {input.forward} \
+            -2 {input.rev} \
+            --met-file {output.stats} \
+            -S {output.sam} > {log} 2>&1
+        """
+
+rule SortSam:
+    input: rules.Map_reads2rRNA.output.sam
+    output:
+        sorted_bam="05.SortSam/{sample}/{sample}.sorted.bam",
+        index="05.SortSam/{sample}/{sample}.sorted.bam.bai"
+    log: "logs/SortSam/{sample}/{sample}.log"
+#    conda: config['CONDA']
+    params:
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+            [ -e {output.sorted_bam} ] || \
+            samtools sort -@ {params.threads} \
+            -o {output.sorted_bam} {input} > {log} 2>&1
+
+            samtools index {output.sorted_bam} {output.index} >> {log} 2>&1
+        """
+
+
+rule Remove_rRNA:
+    input: rules.SortSam.output.sorted_bam
+    output:
+        flag_stat="06.remove_rRNA/{sample}/{sample}.flagstat.txt",
+        stats="06.remove_rRNA/{sample}/{sample}.stats.txt",
+        idxstats="06.remove_rRNA/{sample}/{sample}.idxstats.txt",
+        forward="06.remove_rRNA/{sample}/{sample}_R1.fastq.gz",
+        rev="06.remove_rRNA/{sample}/{sample}_R2.fastq.gz",
+        single="06.remove_rRNA/{sample}/{sample}.S.fastq.gz"
+    log: "logs/Remove_rRNA/{sample}/{sample}.log"
+#    conda: config['CONDA']
+    params:
+        flags="-f 12 -t -F 256",
+        forward="06.remove_rRNA/{sample}/{sample}_R1.fastq",
+        rev="06.remove_rRNA/{sample}/{sample}_R2.fastq",
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        samtools flagstat {input} > {output.flag_stat} 2> {log}
+        samtools stats --remove-dups {input} > {output.stats} 2> {log}
+        samtools idxstats {input} > {output.idxstats} 2> {log}
+        samtools fastq  {params.flags} -1 {params.forward} -2 {params.rev} \
+                -0 {output.single}  {input} >> {log} 2>&1
+
+        parallel -j 2 'gzip {{}}' ::: {params.forward} {params.rev}
+
+        """
+
+rule QC_unmapped_reads:
+    input:
+        forward=rules.Remove_rRNA.output.forward,
+        rev=rules.Remove_rRNA.output.rev
+    output:
+        forward_html="07.QC/unmapped_reads/{sample}/{sample}_R1_fastqc.html",
+        reverse_html="07.QC/unmapped_reads/{sample}/{sample}_R2_fastqc.html"
+#    conda: config['CONDA']
+    params:
+        out_dir= lambda w, output: path.dirname(output[0]),
+        threads=10,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    log: "logs/QC_unmapped_reads/{sample}/{sample}.log"
+    threads: 10
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        fastqc --outdir {params.out_dir} \
+               --threads {threads} \
+               {input.forward} {input.rev} > {log} 2>&1
+        """
+
+
+rule SummarizeQC_unmapped:
+    input:
+        expand(["07.QC/unmapped_reads/{sample}/{sample}_R1_fastqc.html",
+                "07.QC/unmapped_reads/{sample}/{sample}_R2_fastqc.html"],
+               sample=config['SAMPLES'])
+    output:
+        "07.QC/unmapped_reads/multiqc_report.html"
+    threads: 10
+    log: "logs/SummarizeQC_unmapped_reads/multiqc.log"
+#    conda: config['CONDA']
+    params:
+        program = config['programs_path']['multiqc'],
+        out_dir = lambda w, output: path.dirname(output[0]),
+        align_stat_dir="06.remove_rRNA/",
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    shell:
+        """
+        {params.CONDA_ACTIVATE}
+        multiqc --interactive \
+             -f {params.out_dir} {params.align_stat_dir} \
+             -o {params.out_dir} > {log} 2>&1
+         """
 
 
 rule Estimate_abundance:
     input: 
         rules.Prepare_reference.output,
-        forward="05.Trim_reads/{sample}/{sample}.fastq.gz"
+        forward= rules.Remove_rRNA.output.forward,
+        rev=rules.Remove_rRNA.output.rev,
     output: 
-        "06.Estimate_abundance/{sample}/{sample}.isoforms.results",
-        "06.Estimate_abundance/{sample}/{sample}.genes.results",
-        #"06.Estimate_abundance/{sample}/{sample}.genome.sorted.bam",
-        #"06.Estimate_abundance/{sample}/{sample}.genome.sorted.bam.bai"
-    log: "logs/Estimate_abundance/{sample}.log"
+        "08.Estimate_abundance/{sample}/{sample}.isoforms.results",
+        "08.Estimate_abundance/{sample}/{sample}.genes.results",
+        #"08.Estimate_abundance/{sample}/{sample}.genome.sorted.bam",
+        #"08.Estimate_abundance/{sample}/{sample}.genome.sorted.bam.bai"
+    log: "logs/Estimate_abundance/{sample}/{sample}.log"
     params:
-        program=config['programs_path']['rsem']['calculate_expression'],
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib'],
         out_dir=lambda w, output: path.dirname(output[0]),
-        aligner=config['ALIGNER'] # "bowtie", "bowtie2", "star"
-    threads: 10
+        aligner=config['ALIGNER'], # "bowtie", "bowtie2", "star"
+        threads=20,
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 20
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
+        {params.CONDA_ACTIVATE}
         ALIGNER={params.aligner}
         
-        [ -e {params.out_dir}/{wildcards.sample}.fasta ] || zcat {input.forward} > {params.out_dir}/{wildcards.sample}.fasta
+	# Unzip the fastq files
+        [ -e {params.out_dir}/{wildcards.sample}_R1.fastq ] || \
+          zcat {input.forward} > {params.out_dir}/{wildcards.sample}_R1.fastq
+        [ -e {params.out_dir}/{wildcards.sample}_R2.fastq ] || \
+          zcat {input.rev} > {params.out_dir}/{wildcards.sample}_R2.fastq
 
         if [ ${{ALIGNER}} == "bowtie" ]; then
 
-          {params.program} \
-              -p {threads} \
+          rsem-calculate-expression \
+              -p {params.threads} \
               --bowtie \
               --estimate-rspd \
               --append-names \
               --output-genome-bam \
-              {params.out_dir}/{wildcards.sample}.fasta \
-              {REF} {params.out_dir}/{wildcards.sample}
+              --paired-end \
+              {params.out_dir}/{wildcards.sample}_R1.fastq \
+              {params.out_dir}/{wildcards.sample}_R2.fastq \
+              {REF} {params.out_dir}/{wildcards.sample} > {log} 2>&1
 
         elif [ ${{ALIGNER}} == "star" ]; then
 
-          {params.program} \
-              -p {threads} \
+          rsem-calculate-expression \
+              -p {params.threads} \
               --star \
               --estimate-rspd \
               --append-names \
               --output-genome-bam \
-              {params.out_dir}/{wildcards.sample}.fasta \
-              {REF} {params.out_dir}/{wildcards.sample}
-
+              --paired-end \
+              {params.out_dir}/{wildcards.sample}_R1.fastq \
+              {params.out_dir}/{wildcards.sample}_R2.fastq \
+              {REF} {params.out_dir}/{wildcards.sample} > {log} 2>&1
 
         else
 
-          {params.program} \
-              -p {threads} \
+          rsem-calculate-expression \
+              -p {params.threads} \
               --bowtie2 \
               --estimate-rspd \
               --append-names \
               --output-genome-bam \
-              {params.out_dir}/{wildcards.sample}.fasta \
-              {REF} {params.out_dir}/{wildcards.sample}
-
+              --paired-end \
+              {params.out_dir}/{wildcards.sample}_R1.fastq \
+              {params.out_dir}/{wildcards.sample}_R2.fastq \
+              {REF} {params.out_dir}/{wildcards.sample} > {log} 2>&1
 
         fi
    
         #clean
-        rm -rf {params.out_dir}/{wildcards.sample}.fasta
+        rm -rf \
+            {params.out_dir}/{wildcards.sample}_R1.fastq \
+            {params.out_dir}/{wildcards.sample}_R2.fastq
         """
-
-
-
-#rule Get_mapping_statistics:
-#    input:
-#        sorted_bam="06.Estimate_abundance/{sample}/{sample}.genome.sorted.bam"
-#    output:
-#        flag_stat="07.Get_mapping_statistics/{sample}/{sample}.flagstat.txt",
-#        stats="07.Get_mapping_statistics/{sample}/{sample}.stats.txt",
-#        idxstats="07.Get_mapping_statistics/{sample}/{sample}.idxstats.txt"
-#    log: "logs/Get_mapping_statistics/{sample}.log"
-#    params:
-#        program=config['programs_path']['samtools'],
-#        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-#        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
-#    threads: 2
-#    shell:
-#        """
-#        set +u
-#        {params.conda_activate}
-#        {params.PERL5LIB}
-#        set -u
-#        {params.program} flagstat {input.sorted_bam} > {output.flag_stat}
-#        {params.program} stats --remove-dups {input.sorted_bam} > {output.stats}
-#        {params.program} idxstats {input.sorted_bam} > {output.idxstats}
-#       """
-#
-#
-#rule Summarize_mapping_statistics:
-#    input: 
-#        expand("07.Get_mapping_statistics/{sample}/{sample}.idxstats.txt",
-#               sample=config['SAMPLES'])
-#    output:
-#        "08.Summarize_mapping_statistics/multiqc_report.html"
-#    log: "logs/Summarize_mapping_statistics/Summarize_mapping_statistics.log"
-#    threads: 2
-#    params:
-#        program = config['programs_path']['multiqc'],
-#        stats_dir = lambda w, input: path.dirname(input[0]).split('/')[0],
-#        out_dir = lambda w, output: path.dirname(output[0])
-#    shell:
-#        "{params.program} --interactive -f {params.stats_dir}  -o {params.out_dir}"
-#
-
 
 # Generate Transcripts length plot
 rule Plot_lengths:
     input:
-        "06.Estimate_abundance/{sample}/{sample}.isoforms.results",
-        "06.Estimate_abundance/{sample}/{sample}.genes.results"
+        rules.Estimate_abundance.output
     output:
         "09.Plot_lengths/{sample}/{sample}_diagnostic.pdf"
+    log: "logs/Plot_lengths/{sample}/{sample}.log"
     params:
-        program=config['programs_path']['rsem']['plot_model'],
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib'],
-        in_dir=lambda w, input: path.dirname(input[0])
-    threads: 2
+        in_dir=lambda w, input: path.dirname(input[0]),
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+    threads: 10
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-        {params.program} {params.in_dir}/{wildcards.sample} {output}
+        {params.CONDA_ACTIVATE}
+        rsem-plot-model {params.in_dir}/{wildcards.sample} {output} > {log} 2>&1
         """
 
 # Generate genes count matrix
 rule Generate_count_matrix:
     input:
-        expand("06.Estimate_abundance/{sample}/{sample}.genes.results",
+        expand("08.Estimate_abundance/{sample}/{sample}.genes.results",
                sample=config['SAMPLES'])
     output:
         "10.Generate_count_matrix/gene_counts_matrix.tsv"
-    params:
-        program=config['programs_path']['rsem']['generate_matrix'],
-        conda_activate=config['conda']['non_model_RNA_Seq']['env'],
-        PERL5LIB=config['conda']['non_model_RNA_Seq']['perl5lib']
+    log: "logs/Generate_count_matrix/count_matrix.log"
     threads: 10
+    params:
+        CONDA_ACTIVATE=CONDA_ACTIVATE
+#    conda: config['CONDA']
     shell:
         """
-        set +u
-        {params.conda_activate}
-        {params.PERL5LIB}
-        set -u
-
-        {params.program} {input} > {output}
+        {params.CONDA_ACTIVATE}
+        rsem-generate-data-matrix {input} > {output} 2> {log}
         """

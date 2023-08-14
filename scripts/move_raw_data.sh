@@ -2,7 +2,9 @@
 
 # A script to make a seperate directory for each sample and then move the sample's files there
 
-SAMPLES=("0A" "0B" "0C" "0D" "25A" "25B" "25C" "25D")
+SAMPLES=("Control_A" "Control_B" "Control_C" "Control_D" \
+         "Test_1A" "Test_1B" "Test_1C" \
+         "Test_10A" "Test_10B" "Test_10C" "Test_10D")
 
 
 for sample in ${SAMPLES[*]}; do
