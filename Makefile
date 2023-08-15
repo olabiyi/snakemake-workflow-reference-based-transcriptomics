@@ -2,7 +2,7 @@
 
 usage:
 	@echo "make QC # Quality check and filter reads"
-	@echo "make all # Run the complete pipeline"
+	@echo "make run # Run the complete pipeline"
 	@echo "make create_env # Create the conda environment with tools for RNA-seq"
 
 run: qc
